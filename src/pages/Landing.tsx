@@ -200,8 +200,8 @@ export default function Landing() {
             </Button>
             
             <Button asChild variant="outline" size="lg">
-              <Link to="/learn">
-                Learn More
+              <Link to="/integrations">
+                View Integrations
               </Link>
             </Button>
           </div>

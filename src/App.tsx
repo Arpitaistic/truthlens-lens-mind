@@ -7,6 +7,7 @@ import Layout from "./components/Layout";
 import Landing from "./pages/Landing";
 import AnalyzeHub from "./pages/AnalyzeHub";
 import ReportViewer from "./pages/ReportViewer";
+import Integrations from "./pages/Integrations";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -22,6 +23,7 @@ const App = () => (
             <Route path="/" element={<Landing />} />
             <Route path="/analyze" element={<AnalyzeHub />} />
             <Route path="/report/:reportId" element={<ReportViewer />} />
+            <Route path="/integrations" element={<Integrations />} />
             <Route path="/dashboard" element={<div className="p-8 text-center text-muted-foreground">Dashboard coming soon...</div>} />
             <Route path="/learn" element={<div className="p-8 text-center text-muted-foreground">Learn section coming soon...</div>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
