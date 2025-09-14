@@ -1,11 +1,61 @@
-import { useState } from 'react';
-import { FileText, Image, Mic, Video, Link2, Upload, Loader2 } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { FileText, Image, Mic, Video, Link2, Upload, Loader2, MicOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '@/components/ui/use-toast';
+
+// Web Speech API type declarations
+declare global {
+  interface Window {
+    SpeechRecognition?: typeof SpeechRecognition;
+    webkitSpeechRecognition?: typeof SpeechRecognition;
+  }
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onresult: (event: SpeechRecognitionEvent) => void;
+  onerror: (event: SpeechRecognitionErrorEvent) => void;
+  onend: () => void;
+}
+
+interface SpeechRecognitionEvent {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionErrorEvent {
+  error: string;
+}
+
+interface SpeechRecognitionResultList {
+  readonly length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  readonly length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionAlternative {
+  readonly transcript: string;
+  readonly confidence: number;
+}
+
+declare const SpeechRecognition: {
+  new (): SpeechRecognition;
+};
 
 export default function AnalyzeHub() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -13,35 +63,246 @@ export default function AnalyzeHub() {
   const [urlContent, setUrlContent] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [isListening, setIsListening] = useState(false);
   
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
+  useEffect(() => {
+    // Initialize Speech Recognition
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      
+      if (recognitionRef.current) {
+        recognitionRef.current.continuous = true;
+        recognitionRef.current.interimResults = true;
+        recognitionRef.current.lang = 'en-US';
+        
+        recognitionRef.current.onresult = (event) => {
+          let transcript = '';
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            transcript += event.results[i][0].transcript;
+          }
+          setVoiceTranscript(transcript);
+        };
+        
+        recognitionRef.current.onerror = (event) => {
+          console.error('Speech recognition error:', event.error);
+          toast({
+            title: "Voice Recognition Error",
+            description: "Failed to recognize speech. Please try again.",
+            variant: "destructive",
+          });
+          setIsListening(false);
+          setIsRecording(false);
+        };
+        
+        recognitionRef.current.onend = () => {
+          setIsListening(false);
+        };
+      }
+    }
+    
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, [toast]);
 
   const handleAnalyze = async (type: string) => {
+    if (!validateInput(type)) return;
+    
     setIsAnalyzing(true);
     
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsAnalyzing(false);
-    
-    // Navigate to results with mock data
-    navigate('/report/sample', { 
-      state: { 
-        type,
-        content: type === 'text' ? textContent : type === 'url' ? urlContent : 'Sample content',
-      }
-    });
+    try {
+      // Simulate API call with more realistic processing
+      await new Promise(resolve => setTimeout(resolve, Math.random() * 2000 + 1500));
+      
+      // Navigate to results with actual content
+      const content = getContentForType(type);
+      navigate('/report/sample', { 
+        state: { 
+          type,
+          content,
+          timestamp: Date.now()
+        }
+      });
+      
+      toast({
+        title: "Analysis Complete",
+        description: `Successfully analyzed ${type} content`,
+      });
+    } catch (error) {
+      toast({
+        title: "Analysis Failed", 
+        description: "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const validateInput = (type: string) => {
+    switch (type) {
+      case 'text':
+        if (!textContent.trim()) {
+          toast({
+            title: "No Text Content",
+            description: "Please enter some text to analyze.",
+            variant: "destructive",
+          });
+          return false;
+        }
+        break;
+      case 'voice':
+        if (!voiceTranscript.trim()) {
+          toast({
+            title: "No Voice Content",
+            description: "Please record some audio first.",
+            variant: "destructive",
+          });
+          return false;
+        }
+        break;
+      case 'image':
+      case 'video':
+        if (!selectedFile) {
+          toast({
+            title: "No File Selected",
+            description: `Please select a ${type} file to analyze.`,
+            variant: "destructive",
+          });
+          return false;
+        }
+        break;
+      case 'url':
+        if (!urlContent.trim()) {
+          toast({
+            title: "No URL Provided",
+            description: "Please enter a URL to analyze.",
+            variant: "destructive",
+          });
+          return false;
+        }
+        break;
+    }
+    return true;
+  };
+
+  const getContentForType = (type: string) => {
+    switch (type) {
+      case 'text': return textContent;
+      case 'voice': return voiceTranscript;
+      case 'url': return urlContent;
+      case 'image': return selectedFile?.name || 'Image content';
+      case 'video': return selectedFile?.name || 'Video content';
+      default: return 'Sample content';
+    }
   };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
+      // Validate file size (max 50MB)
+      if (file.size > 50 * 1024 * 1024) {
+        toast({
+          title: "File Too Large",
+          description: "Please select a file smaller than 50MB.",
+          variant: "destructive",
+        });
+        return;
+      }
       setSelectedFile(file);
+      toast({
+        title: "File Selected",
+        description: `Selected ${file.name}`,
+      });
     }
   };
 
+  const startVoiceRecording = async () => {
+    try {
+      // Request microphone permission
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Start media recorder for audio file
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+      
+      // Start speech recognition for real-time transcript
+      if (recognitionRef.current) {
+        recognitionRef.current.start();
+        setIsListening(true);
+      }
+      
+      toast({
+        title: "Recording Started",
+        description: "Speak now. Your voice is being recorded and transcribed.",
+      });
+      
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      toast({
+        title: "Microphone Access Denied",
+        description: "Please allow microphone access to use voice recording.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      
+      // Stop all audio tracks
+      const stream = mediaRecorderRef.current.stream;
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    }
+    
+    if (recognitionRef.current && isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    }
+    
+    toast({
+      title: "Recording Stopped",
+      description: "Voice recording completed successfully.",
+    });
+  };
+
   const toggleRecording = () => {
-    setIsRecording(!isRecording);
+    if (isRecording) {
+      stopVoiceRecording();
+    } else {
+      startVoiceRecording();
+    }
+  };
+
+  const clearVoiceTranscript = () => {
+    setVoiceTranscript('');
+    toast({
+      title: "Transcript Cleared",
+      description: "Voice transcript has been cleared.",
+    });
   };
 
   return (
@@ -157,33 +418,93 @@ export default function AnalyzeHub() {
               </TabsContent>
 
               <TabsContent value="voice" className="space-y-4">
-                <div className="space-y-4 text-center">
-                  <div className="border border-border rounded-lg p-8">
-                    <Mic className={`h-16 w-16 mx-auto mb-4 ${isRecording ? 'text-scam animate-pulse' : 'text-muted-foreground'}`} />
+                <div className="space-y-4">
+                  {/* Voice Recording Interface */}
+                  <div className="border border-border rounded-lg p-6 text-center">
+                    <div className="flex items-center justify-center mb-4">
+                      {isRecording ? (
+                        <Mic className="h-16 w-16 text-scam animate-pulse" />
+                      ) : (
+                        <MicOff className="h-16 w-16 text-muted-foreground" />
+                      )}
+                    </div>
+                    
                     <p className="text-muted-foreground mb-4">
-                      {isRecording ? 'Recording... Click to stop' : 'Click to start recording'}
+                      {isRecording 
+                        ? 'Recording... Speak clearly into your microphone' 
+                        : 'Click to start voice recording and real-time transcription'}
                     </p>
-                    <Button 
-                      onClick={toggleRecording}
-                      variant={isRecording ? "destructive" : "outline"}
-                      size="lg"
-                    >
-                      {isRecording ? 'Stop Recording' : 'Start Recording'}
-                    </Button>
+                    
+                    {/* Recording Status Indicator */}
+                    {isRecording && (
+                      <div className="flex justify-center items-center gap-1 mb-4">
+                        <div className="w-2 h-2 bg-scam rounded-full animate-pulse"></div>
+                        <div className="w-2 h-2 bg-scam rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                        <div className="w-2 h-2 bg-scam rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                      </div>
+                    )}
+                    
+                    <div className="flex gap-2 justify-center">
+                      <Button 
+                        onClick={toggleRecording}
+                        variant={isRecording ? "destructive" : "default"}
+                        size="lg"
+                        className={isRecording ? "bg-scam hover:bg-scam/90" : "bg-truth hover:bg-truth/90"}
+                      >
+                        {isRecording ? (
+                          <>
+                            <MicOff className="mr-2 h-4 w-4" />
+                            Stop Recording
+                          </>
+                        ) : (
+                          <>
+                            <Mic className="mr-2 h-4 w-4" />
+                            Start Recording
+                          </>
+                        )}
+                      </Button>
+                      
+                      {voiceTranscript && (
+                        <Button 
+                          onClick={clearVoiceTranscript}
+                          variant="outline"
+                          size="lg"
+                        >
+                          Clear
+                        </Button>
+                      )}
+                    </div>
                   </div>
+
+                  {/* Real-time Transcript Display */}
+                  {voiceTranscript && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">Real-time Transcript</label>
+                      <div className="border border-border rounded-lg p-4 bg-surface min-h-24">
+                        <p className="text-sm text-foreground">
+                          {voiceTranscript || (
+                            <span className="text-muted-foreground italic">
+                              Transcript will appear here as you speak...
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
+                
                 <Button 
                   onClick={() => handleAnalyze('voice')}
-                  disabled={isAnalyzing}
+                  disabled={!voiceTranscript.trim() || isAnalyzing}
                   className="w-full bg-truth hover:bg-truth/90"
                 >
                   {isAnalyzing ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Analyzing...
+                      Analyzing Voice...
                     </>
                   ) : (
-                    'Analyze Voice'
+                    'Analyze Voice Recording'
                   )}
                 </Button>
               </TabsContent>
@@ -212,13 +533,13 @@ export default function AnalyzeHub() {
                 </div>
                 <Button 
                   onClick={() => handleAnalyze('video')}
-                  disabled={isAnalyzing}
+                  disabled={!selectedFile || isAnalyzing}
                   className="w-full bg-truth hover:bg-truth/90"
                 >
                   {isAnalyzing ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Analyzing...
+                      Analyzing Video...
                     </>
                   ) : (
                     'Analyze Video'
@@ -243,7 +564,7 @@ export default function AnalyzeHub() {
                   {isAnalyzing ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Analyzing...
+                      Analyzing URL...
                     </>
                   ) : (
                     'Analyze URL'
